@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"sync"
 
@@ -84,12 +85,34 @@ func (m *manager) close() {
 func (m *manager) startGroup(ctx context.Context, g *rule.Group, restore bool) error {
 	m.wg.Add(1)
 	id := g.ID()
+	// Add tenant to url
+	tenant, ok := g.Labels[rule.TenantId]
+	if !ok {
+		fmt.Printf("Group %s has no label for \"%s\". Set default Tenant\n", g.Name, rule.TenantId)
+		tenant = rule.DefaultId
+	}
+	project, ok := g.Labels[rule.ProjectId]
+	if !ok {
+		fmt.Printf("Group %s has no label for \"%s\". Set default Project\n", g.Name, rule.TenantId)
+		project = rule.DefaultId
+	}
+	rwClient, ok := m.rw.(*remotewrite.Client)
+	if !ok {
+		return errors.New(fmt.Sprintf("cannot convert rw to remotewrite.Client for group %s \n", g.Name))
+	}
+	rwWithTenant := rwClient.RunClientWithTenantAndProject(tenant, project, rule.PrometheusEndpoint)
 	go func() {
 		defer m.wg.Done()
 		if restore {
-			g.Start(ctx, m.notifiers, m.rw, m.rr)
+			rrWithTenant, ok := m.rr.(*datasource.VMStorage)
+			if !ok {
+				fmt.Printf("cannot convert rr to datasource.VMStorage for group %s \n", g.Name)
+			}
+			rrWithTenantClone := rrWithTenant.Clone()
+			rrWithTenantClone.AddTenantIdToUrl(tenant, project, rule.PrometheusEndpoint)
+			g.Start(ctx, m.notifiers, rwWithTenant, rrWithTenantClone)
 		} else {
-			g.Start(ctx, m.notifiers, m.rw, nil)
+			g.Start(ctx, m.notifiers, rwWithTenant, nil)
 		}
 	}()
 	m.groups[id] = g

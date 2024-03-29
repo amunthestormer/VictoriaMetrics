@@ -60,8 +60,8 @@ app-via-docker-windows: package-builder
 			-o bin/$(APP_NAME)-windows$(APP_SUFFIX)-prod.exe $(PKG_PREFIX)/app/$(APP_NAME)
 
 package-via-docker: package-base
-	($(DOCKER_IMAGE_LS) | grep -q '$(DOCKER_NAMESPACE)/$(APP_NAME):$(PKG_TAG)$(APP_SUFFIX)$(RACE)$$') || (\
-		$(MAKE) app-via-docker && \
+	#($(DOCKER_IMAGE_LS) | grep -q '$(DOCKER_NAMESPACE)/$(APP_NAME):$(PKG_TAG)$(APP_SUFFIX)$(RACE)$$') ||
+	($(MAKE) app-via-docker && \
 		$(DOCKER_BUILD) \
 			--build-arg src_binary=$(APP_NAME)$(APP_SUFFIX)-prod \
 			--build-arg base_image=$(BASE_IMAGE) \
@@ -214,3 +214,7 @@ docker-push:
 	$(DOCKER) push $(DOCKER_NAMESPACE)/$(APP_NAME):$(PKG_TAG)$(APP_SUFFIX)$(RACE)
 docker-pull:
 	$(DOCKER) pull $(DOCKER_NAMESPACE)/$(APP_NAME):$(PKG_TAG)$(APP_SUFFIX)$(RACE)
+docker-push-vmalert-latest:
+	$(DOCKER) push $(DOCKER_NAMESPACE)/vmalert:latest
+docker-pull-vmalert-latest:
+	$(DOCKER) pull $(DOCKER_NAMESPACE)/vmalert:latest

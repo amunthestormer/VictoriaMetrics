@@ -82,7 +82,7 @@ func Init(ctx context.Context) (*Client, error) {
 	if err != nil {
 		return nil, fmt.Errorf("failed to configure auth: %w", err)
 	}
-
+	//TODO return NewBaseClient with base config
 	return NewClient(ctx, Config{
 		Addr:          *addr,
 		AuthCfg:       authCfg,

@@ -6,7 +6,7 @@ groups:
     # note the `job` filter and update accordingly to your setup
     rules:
       - alert: TooManyRunningGoThreads
-        expr:  go_threads{job="vmselect"}> 20
+        expr:  go_threads{job="vmselect"}> 17
         for: 1m
         labels:
           severity: warning
@@ -20,7 +20,7 @@ groups:
     # note the `job` filter and update accordingly to your setup
     rules:
       - alert: TooManyRunningGoThreads
-        expr: go_threads{job="vmselect"}> 20
+        expr: go_threads{job="vmselect"}> 17
         for: 1m
         labels:
           severity: warning

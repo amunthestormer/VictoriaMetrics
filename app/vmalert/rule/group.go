@@ -26,6 +26,13 @@ import (
 	"github.com/VictoriaMetrics/metrics"
 )
 
+const (
+	TenantId           = "vm-tenant-id"
+	ProjectId          = "vm-project-id"
+	PrometheusEndpoint = "prometheus"
+	DefaultId          = "0"
+)
+
 var (
 	ruleUpdateEntriesLimit = flag.Int("rule.updateEntriesLimit", 20, "Defines the max number of rule's state updates stored in-memory. "+
 		"Rule's updates are available on rule's Details page and are used for debugging purposes. The number of stored updates can be overridden per rule via update_entries_limit param.")
@@ -106,6 +113,9 @@ func mergeLabels(groupName, ruleName string, set1, set2 map[string]string) map[s
 		r[k] = v
 	}
 	for k, v := range set2 {
+		if k == ProjectId || k == TenantId {
+			continue
+		}
 		if prevV, ok := r[k]; ok {
 			logger.Infof("label %q=%q for rule %q.%q overwritten with external label %q=%q",
 				k, prevV, groupName, ruleName, k, v)
@@ -170,7 +180,26 @@ func NewGroup(cfg config.Group, qb datasource.QuerierBuilder, defaultInterval ti
 			r.Labels = mergeLabels(g.Name, r.Name(), extraLabels, r.Labels)
 		}
 
-		rules[i] = g.newRule(qb, r)
+		// Add tenant and projectID to datasource based on Labels
+		tenant, ok := cfg.Labels[TenantId]
+		if !ok {
+			fmt.Printf("Group %s has no label for \"%s\". Set default Tenant\n", g.Name, TenantId)
+			tenant = DefaultId
+		}
+		project, ok := cfg.Labels[ProjectId]
+		if !ok {
+			fmt.Printf("Group %s has no label for \"%s\". Set default Project\n", g.Name, ProjectId)
+			project = DefaultId
+		}
+		storageQB, ok := qb.(*datasource.VMStorage)
+		if !ok {
+			fmt.Printf("cannot convert ConfigGroup %s datasource to VMStorage\n", cfg.Name)
+			rules[i] = g.newRule(qb, r)
+		} else {
+			newStorageQB := *storageQB
+			newStorageQB.AddTenantIdToUrl(tenant, project, PrometheusEndpoint)
+			rules[i] = g.newRule(&newStorageQB, r)
+		}
 	}
 	g.Rules = rules
 	return g
@@ -334,14 +363,27 @@ func (g *Group) Start(ctx context.Context, nts func() []notifier.Notifier, rw re
 		}
 		evalTS = evalTS.Add(sleepBeforeStart)
 	}
+	tenantLabels := make(map[string]string)
+	tenant, ok := g.Labels[TenantId]
+	if !ok {
+		fmt.Printf("No label for TenantId in group %s. Set Default TenantId \n", g.Name)
+		tenant = DefaultId
+	}
+	project, ok := g.Labels[ProjectId]
+	if !ok {
+		fmt.Printf("No label for ProjectId in group %s. Set Default ProjectId \n", g.Name)
+		project = DefaultId
+	}
+	tenantLabels[TenantId] = tenant
+	tenantLabels[ProjectId] = project
 
 	e := &executor{
+		TenantLabels:             tenantLabels,
 		Rw:                       rw,
 		Notifiers:                nts,
 		notifierHeaders:          g.NotifierHeaders,
 		previouslySentSeriesToRW: make(map[uint64]map[string][]prompbmarshal.Label),
 	}
-
 	g.infof("started")
 
 	eval := func(ctx context.Context, ts time.Time) {
@@ -615,6 +657,8 @@ func (g *Group) getEvalDelay() time.Duration {
 
 // executor contains group's notify and rw configs
 type executor struct {
+	TenantLabels map[string]string
+
 	Notifiers       func() []notifier.Notifier
 	notifierHeaders map[string]string
 
@@ -678,7 +722,6 @@ func (e *executor) exec(ctx context.Context, r Rule, ts time.Time, resolveDurati
 		execErrors.Inc()
 		return fmt.Errorf("rule %q: failed to execute: %w", r, err)
 	}
-
 	if e.Rw != nil {
 		pushToRW := func(tss []prompbmarshal.TimeSeries) error {
 			var lastErr error
@@ -703,12 +746,16 @@ func (e *executor) exec(ctx context.Context, r Rule, ts time.Time, resolveDurati
 	if !ok {
 		return nil
 	}
-
+	//TODO add tenant and project id label to alert before sending to alert manager
 	alerts := ar.alertsToSend(ts, resolveDuration, *resendDelay)
 	if len(alerts) < 1 {
 		return nil
 	}
-
+	// Add label for sending to alert manager
+	for _, alert := range alerts {
+		alert.Labels[ProjectId] = e.TenantLabels[ProjectId]
+		alert.Labels[TenantId] = e.TenantLabels[TenantId]
+	}
 	wg := sync.WaitGroup{}
 	errGr := new(utils.ErrGroup)
 	for _, nt := range e.Notifiers() {
@@ -719,6 +766,11 @@ func (e *executor) exec(ctx context.Context, r Rule, ts time.Time, resolveDurati
 			}
 			wg.Done()
 		}(nt)
+	}
+	// Remove label after sending to alert manager
+	for _, alert := range alerts {
+		delete(alert.Labels, ProjectId)
+		delete(alert.Labels, TenantId)
 	}
 	wg.Wait()
 	return errGr.Err()

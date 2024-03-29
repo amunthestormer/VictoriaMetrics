@@ -34,11 +34,16 @@ var (
 	sendTimeout       = flag.Duration("remoteWrite.sendTimeout", 30*time.Second, "Timeout for sending data to the configured -remoteWrite.url.")
 	retryMinInterval  = flag.Duration("remoteWrite.retryMinInterval", time.Second, "The minimum delay between retry attempts. Every next retry attempt will double the delay to prevent hammering of remote database. See also -remoteWrite.retryMaxInterval")
 	retryMaxTime      = flag.Duration("remoteWrite.retryMaxTime", time.Second*30, "The max time spent on retry attempts for the failed remote-write request. Change this value if it is expected for remoteWrite.url to be unreachable for more than -remoteWrite.retryMaxTime. See also -remoteWrite.retryMinInterval")
+	ctx               context.Context
 )
 
 // Client is an asynchronous HTTP client for writing
 // timeseries via remote write protocol.
 type Client struct {
+	// Pass ctx and concurrency from Config
+	ctx         context.Context
+	concurrency int
+
 	addr          string
 	c             *http.Client
 	authCfg       *promauth.Config
@@ -96,6 +101,8 @@ func NewClient(ctx context.Context, cfg Config) (*Client, error) {
 		cc = cfg.Concurrency
 	}
 	c := &Client{
+		ctx:         ctx,
+		concurrency: cc,
 		c: &http.Client{
 			Timeout:   *sendTimeout,
 			Transport: cfg.Transport,
@@ -105,14 +112,36 @@ func NewClient(ctx context.Context, cfg Config) (*Client, error) {
 		flushInterval: cfg.FlushInterval,
 		maxBatchSize:  cfg.MaxBatchSize,
 		maxQueueSize:  cfg.MaxQueueSize,
-		doneCh:        make(chan struct{}),
-		input:         make(chan prompbmarshal.TimeSeries, cfg.MaxQueueSize),
+		//doneCh:        make(chan struct{}),
+		//input:         make(chan prompbmarshal.TimeSeries, cfg.MaxQueueSize),
 	}
 
-	for i := 0; i < cc; i++ {
-		c.run(ctx)
-	}
+	//for i := 0; i < cc; i++ {
+	//	c.run(ctx)
+	//}
 	return c, nil
+}
+
+func (c *Client) RunClientWithTenantAndProject(tenant, project, metricTypeEndpoint string) *Client {
+	cloneClient := &Client{
+		ctx:         c.ctx,
+		concurrency: c.concurrency,
+		addr:        c.addr + fmt.Sprintf("/insert/%s:%s/%s", tenant, project, metricTypeEndpoint),
+		c: &http.Client{
+			Timeout:   c.c.Timeout,
+			Transport: http.DefaultTransport.(*http.Transport).Clone(),
+		},
+		authCfg:       c.authCfg,
+		input:         make(chan prompbmarshal.TimeSeries, c.maxQueueSize),
+		flushInterval: c.flushInterval,
+		maxBatchSize:  c.maxBatchSize,
+		maxQueueSize:  c.maxQueueSize,
+		doneCh:        make(chan struct{}),
+	}
+	for i := 0; i < cloneClient.concurrency; i++ {
+		cloneClient.run(c.ctx)
+	}
+	return cloneClient
 }
 
 // Push adds timeseries into queue for writing into remote storage.
@@ -151,22 +180,12 @@ func (c *Client) run(ctx context.Context) {
 	ticker := time.NewTicker(c.flushInterval)
 	wr := &prompbmarshal.WriteRequest{}
 	shutdown := func() {
-		lastCtx, cancel := context.WithTimeout(context.Background(), defaultWriteTimeout)
-		logger.Infof("shutting down remote write client and flushing remained series")
-
-		shutdownFlushCnt := 0
 		for ts := range c.input {
 			wr.Timeseries = append(wr.Timeseries, ts)
-			if len(wr.Timeseries) >= c.maxBatchSize {
-				shutdownFlushCnt += len(wr.Timeseries)
-				c.flush(lastCtx, wr)
-			}
 		}
-		// flush the last batch. `flush` will re-check and avoid flushing empty batch.
-		shutdownFlushCnt += len(wr.Timeseries)
+		lastCtx, cancel := context.WithTimeout(context.Background(), defaultWriteTimeout)
+		logger.Infof("shutting down remote write client and flushing remained %d series", len(wr.Timeseries))
 		c.flush(lastCtx, wr)
-
-		logger.Infof("shutting down remote write client flushed %d series", shutdownFlushCnt)
 		cancel()
 	}
 	c.wg.Add(1)

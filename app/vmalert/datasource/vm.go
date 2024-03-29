@@ -55,6 +55,11 @@ type keyValue struct {
 	value string
 }
 
+// AddTenantIdToUrl	add tenant info to the datasource url
+func (s *VMStorage) AddTenantIdToUrl(tenant, project, metricTypeEndpoint string) {
+	s.datasourceURL += fmt.Sprintf("/select/%s:%s/%s", tenant, project, metricTypeEndpoint)
+}
+
 // Clone makes clone of VMStorage, shares http client.
 func (s *VMStorage) Clone() *VMStorage {
 	ns := &VMStorage{

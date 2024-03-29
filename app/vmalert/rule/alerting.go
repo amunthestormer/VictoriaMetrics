@@ -437,6 +437,7 @@ func (ar *AlertingRule) exec(ctx context.Context, ts time.Time, limit int) ([]pr
 			if err != nil {
 				return nil, err
 			}
+
 			a.KeepFiringSince = time.Time{}
 			continue
 		}
@@ -578,6 +579,10 @@ func (ar *AlertingRule) alertToTimeSeries(a *notifier.Alert, timestamp int64) []
 func alertToTimeSeries(a *notifier.Alert, timestamp int64) prompbmarshal.TimeSeries {
 	labels := make(map[string]string)
 	for k, v := range a.Labels {
+		if k == ProjectId || k == TenantId {
+			fmt.Printf("TEST SKIP ProjectId or TenantId\n")
+			continue
+		}
 		labels[k] = v
 	}
 	labels["__name__"] = alertMetricName
@@ -590,6 +595,10 @@ func alertToTimeSeries(a *notifier.Alert, timestamp int64) prompbmarshal.TimeSer
 func alertForToTimeSeries(a *notifier.Alert, timestamp int64) prompbmarshal.TimeSeries {
 	labels := make(map[string]string)
 	for k, v := range a.Labels {
+		if k == ProjectId || k == TenantId {
+			fmt.Printf("TEST SKIP ProjectId or TenantId\n")
+			continue
+		}
 		labels[k] = v
 	}
 	labels["__name__"] = alertForStateMetricName
@@ -676,6 +685,7 @@ func (ar *AlertingRule) alertsToSend(ts time.Time, resolveDuration, resendDelay 
 			a.End = a.ResolvedAt
 		}
 		a.LastSent = ts
+
 		alerts = append(alerts, *a)
 	}
 	return alerts
