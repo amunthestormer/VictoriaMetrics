@@ -1,0 +1,29 @@
+groups:
+  - name: vm-tenant1-project2
+    labels:
+      vm-tenant-id: 1
+      vm-project-id: 2
+    # note the `job` filter and update accordingly to your setup
+    rules:
+      - alert: TooManyRunningGoThreads
+        expr:  go_threads{job="vmselect"}> 20
+        for: 1m
+        labels:
+          severity: warning
+        annotations:
+          summary: "{{ $labels.job }} too many running go threads (instance {{ $labels.instance }})"
+          description: "Job {{ $labels.job }} (instance {{ $labels.instance }}) has more than 10 go_threads."
+  - name: vm-tenant1-project3
+    labels:
+      vm-tenant-id: 1
+      vm-project-id: 3
+    # note the `job` filter and update accordingly to your setup
+    rules:
+      - alert: TooManyRunningGoThreads
+        expr: go_threads{job="vmselect"}> 20
+        for: 1m
+        labels:
+          severity: warning
+        annotations:
+          summary: "{{ $labels.job }} too many restarts (instance {{ $labels.instance }})"
+          description: "Job {{ $labels.job }} (instance {{ $labels.instance }}) has more than 10 go_threads."

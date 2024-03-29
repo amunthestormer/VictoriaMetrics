@@ -3,37 +3,51 @@ services:
   #  Metrics collector.
   #  It scrapes targets defined in --promscrape.config
   #  And forward them to --remoteWrite.url
-  vmagent:
-    container_name: vmagent
+  vmagent-1:
+    container_name: vmagent-1
     image: victoriametrics/vmagent:v1.99.0
     depends_on:
       - "vminsert"
     ports:
       - 8429:8429
     volumes:
-      - vmagentdata:/vmagentdata
+      - vmagentdata-1:/vmagentdata
       - ./prometheus-cluster.yml:/etc/prometheus/prometheus.yml
     command:
       - '--promscrape.config=/etc/prometheus/prometheus.yml'
-      - '--remoteWrite.url=http://vminsert:8480/insert/0/prometheus/'
+      - '--remoteWrite.url=http://vminsert:8480/insert/1:3/prometheus/'
     restart: always
 
-  # Grafana instance configured with VictoriaMetrics as datasource
-  grafana:
-    container_name: grafana
-    image: grafana/grafana:10.3.1
+  vmagent-2:
+    container_name: vmagent-2
+    image: victoriametrics/vmagent:v1.99.0
     depends_on:
-      - "vmauth"
+      - "vminsert"
     ports:
-      - 3000:3000
-    restart: always
+      - 8430:8429
     volumes:
-      - grafanadata:/var/lib/grafana
-      - ./provisioning/datasources/prometheus-datasource:/etc/grafana/provisioning/datasources
-      - ./provisioning/dashboards:/etc/grafana/provisioning/dashboards
-      - ./../../dashboards/victoriametrics-cluster.json:/var/lib/grafana/dashboards/vm.json
-      - ./../../dashboards/vmagent.json:/var/lib/grafana/dashboards/vmagent.json
-      - ./../../dashboards/vmalert.json:/var/lib/grafana/dashboards/vmalert.json
+      - vmagentdata-2:/vmagentdata
+      - ./prometheus-cluster.yml:/etc/prometheus/prometheus.yml
+    command:
+      - '--promscrape.config=/etc/prometheus/prometheus.yml'
+      - '--remoteWrite.url=http://vminsert:8480/insert/1:2/prometheus/'
+    restart: always
+  # Grafana instance configured with VictoriaMetrics as datasource
+#  grafana:
+#    container_name: grafana
+#    image: grafana/grafana:10.3.1
+#    depends_on:
+#      - "vmauth"
+#    ports:
+#      - 3000:3000
+#    restart: always
+#    volumes:
+#      - grafanadata:/var/lib/grafana
+#      - ./provisioning/datasources/prometheus-datasource:/etc/grafana/provisioning/datasources
+#      - ./provisioning/dashboards:/etc/grafana/provisioning/dashboards
+#      - ./../../dashboards/victoriametrics-cluster.json:/var/lib/grafana/dashboards/vm.json
+#      - ./../../dashboards/vmagent.json:/var/lib/grafana/dashboards/vmagent.json
+#      - ./../../dashboards/vmalert.json:/var/lib/grafana/dashboards/vmalert.json
 
   # vmstorage shards. Each shard receives 1/N of all metrics sent to vminserts,
   # where N is number of vmstorages (2 in this case).
@@ -76,7 +90,18 @@ services:
     ports:
       - 8480:8480
     restart: always
-
+#  vminsert-2:
+#    container_name: vminsert
+#    image: victoriametrics/vminsert:v1.99.0-cluster
+#    depends_on:
+#      - "vmstorage-1"
+#      - "vmstorage-2"
+#    command:
+#      - '--storageNode=vmstorage-1:8400'
+#      - '--storageNode=vmstorage-2:8400'
+#    ports:
+#      - 8481:8480
+#    restart: always
   # vmselect is a query fronted. It serves read queries in MetricsQL or PromQL.
   # vmselect collects results from configured `--storageNode` shards.
   vmselect-1:
@@ -127,24 +152,29 @@ services:
   # vmalert executes alerting and recording rules
   vmalert:
     container_name: vmalert
-    image: victoriametrics/vmalert:v1.99.0
+#    image: victoriametrics/vmalert:v1.99.0
+    image: linhnt35/vmalert:latest
     depends_on:
       - "vmauth"
     ports:
       - 8880:8880
     volumes:
-      - ./alerts-cluster.yml:/etc/alerts/alerts.yml
-      - ./alerts-health.yml:/etc/alerts/alerts-health.yml
-      - ./alerts-vmagent.yml:/etc/alerts/alerts-vmagent.yml
-      - ./alerts-vmalert.yml:/etc/alerts/alerts-vmalert.yml
+      - ./alerts-multitenant-rule.yml:/etc/alerts/alerts-multitenant-rule.yml
+#      - ./alerts-cluster.yml:/etc/alerts/alerts.yml
+#      - ./alerts-health.yml:/etc/alerts/alerts-health.yml
+#      - ./alerts-vmagent.yml:/etc/alerts/alerts-vmagent.yml
+#      - ./alerts-vmalert.yml:/etc/alerts/alerts-vmalert.yml
     command:
-      - '--datasource.url=http://vmauth:8427/select/0/prometheus'
-      - '--remoteRead.url=http://vmauth:8427/select/0/prometheus'
-      - '--remoteWrite.url=http://vminsert:8480/insert/0/prometheus'
+#      - '--datasource.url=http://vmauth:8427/select/1:3/prometheus'
+#      - '--remoteRead.url=http://vmauth:8427/select/1:3/prometheus'
+#      - '--remoteWrite.url=http://vminsert:8480/insert/1:3/prometheus'
+      - '--datasource.url=http://vmauth:8427'
+      - '--remoteRead.url=http://vmauth:8427'
+      - '--remoteWrite.url=http://vminsert:8480'
       - '--notifier.url=http://alertmanager:9093/'
       - '--rule=/etc/alerts/*.yml'
       # display source of alerts in grafana
-      - '-external.url=http://127.0.0.1:3000' #grafana outside container
+#      - '-external.url=http://127.0.0.1:3000' #grafana outside container
       # when copypaste the line below be aware of '$$' for escaping in '$expr'
       - '--external.alert.source=explore?orgId=1&left={"datasource":"VictoriaMetrics","queries":[{"expr":{{$$expr|jsonEscape|queryEscape}},"refId":"A"}],"range":{"from":"now-1h","to":"now"}}'
     restart: always
@@ -153,7 +183,7 @@ services:
   # and distributes them according to --config.file.
   alertmanager:
     container_name: alertmanager
-    image: prom/alertmanager:v0.27.0
+    image: prom/alertmanager:v0.25.0
     volumes:
       - ./alertmanager.yml:/config/alertmanager.yml
     command:
@@ -163,7 +193,8 @@ services:
     restart: always
 
 volumes:
-  vmagentdata: {}
+  vmagentdata-1: {}
+  vmagentdata-2: {}
   strgdata-1: {}
   strgdata-2: {}
   grafanadata: {}

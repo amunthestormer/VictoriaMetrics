@@ -1,6 +1,6 @@
 # All these commands must run from repository root.
 
-DOCKER_NAMESPACE ?= victoriametrics
+DOCKER_NAMESPACE ?= linhnt35
 
 ROOT_IMAGE ?= alpine:3.19.1
 CERTS_IMAGE := alpine:3.19.1
@@ -210,3 +210,7 @@ docker-victorialogs-up:
 
 docker-victorialogs-down:
 	$(DOCKER_COMPOSE) -f deployment/docker/docker-compose-victorialogs.yml down -v
+docker-push:
+	$(DOCKER) push $(DOCKER_NAMESPACE)/$(APP_NAME):$(PKG_TAG)$(APP_SUFFIX)$(RACE)
+docker-pull:
+	$(DOCKER) pull $(DOCKER_NAMESPACE)/$(APP_NAME):$(PKG_TAG)$(APP_SUFFIX)$(RACE)
