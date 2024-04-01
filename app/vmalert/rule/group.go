@@ -751,26 +751,27 @@ func (e *executor) exec(ctx context.Context, r Rule, ts time.Time, resolveDurati
 	if len(alerts) < 1 {
 		return nil
 	}
-	// Add label for sending to alert manager
-	for _, alert := range alerts {
-		alert.Labels[ProjectId] = e.TenantLabels[ProjectId]
-		alert.Labels[TenantId] = e.TenantLabels[TenantId]
-	}
+
 	wg := sync.WaitGroup{}
 	errGr := new(utils.ErrGroup)
 	for _, nt := range e.Notifiers() {
 		wg.Add(1)
 		go func(nt notifier.Notifier) {
+			// Add label for sending to alert manager
+			for _, alert := range alerts {
+				alert.Labels[ProjectId] = e.TenantLabels[ProjectId]
+				alert.Labels[TenantId] = e.TenantLabels[TenantId]
+			}
 			if err := nt.Send(ctx, alerts, e.notifierHeaders); err != nil {
 				errGr.Add(fmt.Errorf("rule %q: failed to send alerts to addr %q: %w", r, nt.Addr(), err))
 			}
+			// Remove label after sending to alert manager
+			for _, alert := range alerts {
+				delete(alert.Labels, ProjectId)
+				delete(alert.Labels, TenantId)
+			}
 			wg.Done()
 		}(nt)
-	}
-	// Remove label after sending to alert manager
-	for _, alert := range alerts {
-		delete(alert.Labels, ProjectId)
-		delete(alert.Labels, TenantId)
 	}
 	wg.Wait()
 	return errGr.Err()
